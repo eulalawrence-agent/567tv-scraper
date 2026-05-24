@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+
+const HlsPlayer = dynamic(() => import('../components/HlsPlayer'), { ssr: false });
 
 export default function Home() {
   const [streams, setStreams] = useState([]);
@@ -10,6 +13,9 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [areaFilter, setAreaFilter] = useState('all');
+  const [m3u8, setM3u8] = useState(null);
+  const [m3u8Loading, setM3u8Loading] = useState(false);
+  const [m3u8Error, setM3u8Error] = useState(null);
 
   const fetchStreams = useCallback(async (p = 1) => {
     setLoading(true);
@@ -31,6 +37,40 @@ export default function Home() {
   }, []);
 
   useEffect(() => { fetchStreams(1); }, [fetchStreams]);
+
+  const fetchM3u8 = async (anchorId) => {
+    setM3u8Loading(true);
+    setM3u8Error(null);
+    setM3u8(null);
+    try {
+      const resp = await fetch(`/api/m3u8?anchorId=${anchorId}`);
+      const data = await resp.json();
+      if (data.m3u8) {
+        setM3u8(data.m3u8);
+      } else {
+        setM3u8Error(data.error || 'M3U8 not found');
+      }
+    } catch (err) {
+      setM3u8Error(err.message);
+    } finally {
+      setM3u8Loading(false);
+    }
+  };
+
+  const openStream = (stream) => {
+    setSelected(stream);
+    setM3u8(null);
+    setM3u8Error(null);
+    // Auto-fetch m3u8
+    fetchM3u8(stream.anchorId);
+  };
+
+  const closeModal = () => {
+    setSelected(null);
+    setM3u8(null);
+    setM3u8Error(null);
+    setM3u8Loading(false);
+  };
 
   const filtered = streams.filter((s) => {
     const q = search.toLowerCase();
@@ -86,38 +126,62 @@ export default function Home() {
 
       {/* Player Modal */}
       {selected && (
-        <div className="modal-overlay" onClick={() => setSelected(null)}>
+        <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{selected.name}</h2>
-              <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+              <button className="modal-close" onClick={closeModal}>✕</button>
             </div>
             <p className="modal-live">{selected.liveName}</p>
+
+            {/* HLS Player */}
             <div className="player-wrapper">
-              <iframe
-                src={`https://567tv2.com/room/${selected.anchorId}`}
-                className="player-iframe"
-                allow="autoplay; fullscreen; picture-in-picture"
-                allowFullScreen
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-              />
+              {m3u8Loading && (
+                <div className="player-loading">
+                  <div className="spinner" />
+                  <p>Extracting stream URL...</p>
+                  <p className="player-loading-sub">This may take 20-30 seconds</p>
+                </div>
+              )}
+              {m3u8Error && (
+                <div className="player-error">
+                  <p>⚠️ {m3u8Error}</p>
+                  <a
+                    href={`https://567tv2.com/room/${selected.anchorId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
+                  >
+                    🔗 Watch on 567TV
+                  </a>
+                </div>
+              )}
+              {m3u8 && <HlsPlayer src={m3u8} />}
             </div>
+
             <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => fetchM3u8(selected.anchorId)}
+                disabled={m3u8Loading}
+              >
+                🔄 Refresh Stream
+              </button>
               <a
                 href={`https://567tv2.com/room/${selected.anchorId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="btn btn-primary"
+                className="btn btn-secondary"
               >
-                🔗 Open in New Tab
+                🔗 Open on 567TV
               </a>
               <button
                 className="btn btn-secondary"
                 onClick={() => {
-                  navigator.clipboard.writeText(`https://567tv2.com/room/${selected.anchorId}`);
+                  if (m3u8) navigator.clipboard.writeText(m3u8);
                 }}
               >
-                📋 Copy URL
+                📋 Copy M3U8
               </button>
             </div>
             <div className="modal-info">
@@ -137,7 +201,7 @@ export default function Home() {
       ) : (
         <div className="grid">
           {filtered.map(s => (
-            <div key={s.id} className="card" onClick={() => setSelected(s)}>
+            <div key={s.id} className="card" onClick={() => openStream(s)}>
               <div className="card-img">
                 <img src={s.cover} alt={s.name} loading="lazy" />
                 <span className="viewers">👥 {fmt(s.viewers)}</span>

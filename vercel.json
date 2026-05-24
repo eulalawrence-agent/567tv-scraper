@@ -1,13 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "pages/api/stream/[id].js": {
-      "memory": 1024,
-      "maxDuration": 60
-    },
-    "pages/api/streams.js": {
-      "memory": 256,
-      "maxDuration": 10
-    }
-  }
+  "version": 2
 }

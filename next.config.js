@@ -1,3 +1,4 @@
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
@@ -10,13 +11,6 @@ const nextConfig = {
         ],
       },
     ];
-  },
-  // Exclude playwright from bundle (use at runtime only)
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals.push('playwright-core', '@sparticuz/chromium');
-    }
-    return config;
   },
 };
 

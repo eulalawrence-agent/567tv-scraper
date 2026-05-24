@@ -1,31 +1,22 @@
 // M3U8 stream URL extractor
-// Uses Playwright + @sparticuz/chromium for Vercel serverless
+// Uses @sparticuz/chromium + playwright-core for Vercel serverless
 
 // In-memory cache: anchorId -> { url, expiresAt }
 const cache = new Map();
 
 async function getBrowser() {
-  try {
-    const chromium = require('@sparticuz/chromium');
-    const { chromium: playwright } = require('playwright-core');
-    const executablePath = await chromium.executablePath();
-    return playwright.launch({
-      executablePath,
-      headless: true,
-      args: chromium.args || ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-  } catch {
-    // Fallback: try regular playwright (local dev)
-    const { chromium } = require('playwright');
-    return chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-  }
+  const chromium = require('@sparticuz/chromium');
+  const { chromium: playwright } = require('playwright-core');
+  const executablePath = await chromium.executablePath();
+  return playwright.launch({
+    executablePath,
+    headless: chromium.headless ?? true,
+    args: chromium.args || ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
 }
 
 async function fetchM3u8FromRoom(anchorId) {
-  // Check cache (valid if more than 5 min before expiry)
+  // Check cache
   const cached = cache.get(anchorId);
   if (cached && cached.expiresAt > Date.now() + 300_000) {
     return { url: cached.url, cached: true };
@@ -99,8 +90,7 @@ async function fetchM3u8FromRoom(anchorId) {
     await context.close();
 
     if (m3u8Url) {
-      // Parse expiry from URL
-      let expiresAt = Date.now() + 3600_000; // default 1h
+      let expiresAt = Date.now() + 3600_000;
       try {
         const urlObj = new URL(m3u8Url);
         const expire = parseInt(urlObj.searchParams.get('expire') || '0');

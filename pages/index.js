@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Hls from 'hls.js';
 
 function formatViewers(n) {
@@ -7,26 +7,121 @@ function formatViewers(n) {
   return n.toString();
 }
 
+// Extract m3u8 by loading 567tv room page in hidden iframe
+function useM3u8Extractor() {
+  const iframeRef = useRef(null);
+  const [m3u8Map, setM3u8Map] = useState({});
+
+  const extract = useCallback((anchorId) => {
+    return new Promise((resolve) => {
+      // Check cache first
+      if (m3u8Map[anchorId]) {
+        resolve(m3u8Map[anchorId]);
+        return;
+      }
+
+      // Create hidden iframe
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = `https://567tv2.com/room/${anchorId}`;
+      document.body.appendChild(iframe);
+      iframeRef.current = iframe;
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, 25000);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      };
+
+      // Poll performance entries for m3u8
+      const check = setInterval(() => {
+        try {
+          // Can't access iframe cross-origin perf entries
+          // But we can check if the iframe loaded
+        } catch {}
+      }, 1000);
+
+      iframe.onload = () => {
+        // After iframe loads, we can't access cross-origin content
+        // But the m3u8 request will appear in our own performance entries
+        setTimeout(() => {
+          const entries = performance.getEntries();
+          const m3u8Entry = entries.find(
+            (e) => e.name.includes('.m3u8') && e.name.includes('cdnsi')
+          );
+          clearInterval(check);
+          cleanup();
+          if (m3u8Entry) {
+            setM3u8Map((prev) => ({ ...prev, [anchorId]: m3u8Entry.name }));
+            resolve(m3u8Entry.name);
+          } else {
+            resolve(null);
+          }
+        }, 10000);
+      };
+    });
+  }, [m3u8Map]);
+
+  return { extract, m3u8Map };
+}
+
 function Player({ anchorId, name, onBack }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const [m3u8, setM3u8] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [method, setMethod] = useState('');
 
   const fetchM3u8 = async () => {
     setLoading(true);
     setError(null);
+    setMethod('');
+
     try {
+      // Method 1: Try backend API (Playwright-based)
       const resp = await fetch(`/api/stream/${anchorId}`);
       const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      setM3u8(data.m3u8);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+      if (data.m3u8) {
+        setM3u8(data.m3u8);
+        setMethod('backend');
+        return;
+      }
+    } catch {}
+
+    // Method 2: Try iframe extraction (frontend)
+    try {
+      setMethod('iframe');
+      const iframe = document.createElement('iframe');
+      iframe.style.cssText =
+        'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;';
+      iframe.src = `https://567tv2.com/room/${anchorId}`;
+      document.body.appendChild(iframe);
+
+      // Wait for iframe to load and stream to start
+      await new Promise((r) => setTimeout(r, 20000));
+
+      // Check performance entries
+      const entries = performance.getEntries();
+      const m3u8Entry = entries.find(
+        (e) => e.name.includes('.m3u8') && e.name.includes('cdnsi')
+      );
+
+      document.body.removeChild(iframe);
+
+      if (m3u8Entry) {
+        setM3u8(m3u8Entry.name);
+        setMethod('iframe-success');
+        return;
+      }
+    } catch {}
+
+    setError('Could not extract m3u8 URL. Try again.');
+    setMethod('failed');
   };
 
   useEffect(() => {
@@ -38,7 +133,6 @@ function Player({ anchorId, name, onBack }) {
 
   useEffect(() => {
     if (!m3u8 || !videoRef.current) return;
-
     const video = videoRef.current;
 
     if (hlsRef.current) hlsRef.current.destroy();
@@ -46,9 +140,8 @@ function Player({ anchorId, name, onBack }) {
     if (Hls.isSupported()) {
       const hls = new Hls({
         maxBufferLength: 10,
-        maxMaxBufferLength: 20,
         liveSyncDuration: 3,
-        liveMaxLatencyDuration: 10,
+        liveMaxLatencyDuration: 15,
         enableWorker: true,
       });
       hls.loadSource(m3u8);
@@ -57,8 +150,7 @@ function Player({ anchorId, name, onBack }) {
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Auto-refresh m3u8 on network error (likely expired)
-            fetchM3u8();
+            fetchM3u8(); // Auto-refresh on expiry
           } else {
             setError('Stream error: ' + data.details);
           }
@@ -86,11 +178,16 @@ function Player({ anchorId, name, onBack }) {
         </button>
         <span className="player-name">{name}</span>
         <button className="refresh-btn" onClick={fetchM3u8} disabled={loading}>
-          🔄 Refresh
+          🔄
         </button>
       </div>
 
-      {loading && <div className="player-loading">Loading stream...</div>}
+      {loading && (
+        <div className="player-loading">
+          <div className="spinner" />
+          <p>Loading stream... ({method || 'trying'})</p>
+        </div>
+      )}
       {error && (
         <div className="player-error">
           <p>❌ {error}</p>
@@ -110,7 +207,7 @@ function Player({ anchorId, name, onBack }) {
       {m3u8 && (
         <div className="m3u8-info">
           <details>
-            <summary>M3U8 URL</summary>
+            <summary>M3U8 URL ({method})</summary>
             <code>{m3u8}</code>
           </details>
         </div>
@@ -129,7 +226,8 @@ function StreamCard({ stream, onClick }) {
           className="stream-cover"
           loading="lazy"
           onError={(e) => {
-            e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect fill="%23222" width="200" height="200"/><text fill="%23666" x="100" y="100" text-anchor="middle" dy=".3em">No Image</text></svg>';
+            e.target.src =
+              'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect fill="%23222" width="200" height="200"/></svg>';
           }}
         />
         <div className="stream-live-badge">LIVE</div>
@@ -150,20 +248,16 @@ export default function Home() {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
-  const [error, setError] = useState(null);
 
   const fetchStreams = async (p = 1) => {
     setLoading(true);
-    setError(null);
     try {
       const resp = await fetch(`/api/streams?page=${p}&size=30`);
       const data = await resp.json();
-      if (data.error) throw new Error(data.error);
       setStreams(data.streams);
       setTotalPages(data.pages);
       setPage(p);
-    } catch (err) {
-      setError(err.message);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -194,22 +288,18 @@ export default function Home() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="title">📺 567TV Stream Viewer</h1>
-        <div className="controls">
-          <input
-            type="text"
-            placeholder="Search streams..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="search-input"
-          />
-        </div>
+        <h1 className="title">📺 567TV</h1>
+        <input
+          type="text"
+          placeholder="Search..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="search-input"
+        />
       </header>
 
-      {error && <div className="error-banner">❌ {error}</div>}
-
       {loading ? (
-        <div className="loading">Loading streams...</div>
+        <div className="loading">Loading...</div>
       ) : (
         <>
           <div className="stream-grid">
@@ -223,28 +313,21 @@ export default function Home() {
           </div>
 
           <div className="pagination">
-            <button
-              disabled={page <= 1}
-              onClick={() => fetchStreams(page - 1)}
-            >
-              ← Prev
+            <button disabled={page <= 1} onClick={() => fetchStreams(page - 1)}>
+              ←
             </button>
             <span>
-              Page {page} / {totalPages}
+              {page}/{totalPages}
             </span>
             <button
               disabled={page >= totalPages}
               onClick={() => fetchStreams(page + 1)}
             >
-              Next →
+              →
             </button>
           </div>
         </>
       )}
-
-      <footer className="footer">
-        <p>Streams from 567tv2.com • Auto-refreshes on expiry</p>
-      </footer>
     </div>
   );
 }

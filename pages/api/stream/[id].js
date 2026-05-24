@@ -10,20 +10,18 @@ async function getBrowser() {
   const executablePath = await chromium.executablePath();
   return playwright.launch({
     executablePath,
-    headless: chromium.headless ?? true,
+    headless: true,
     args: chromium.args || ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 }
 
 async function fetchM3u8FromRoom(anchorId) {
-  // Check cache
   const cached = cache.get(anchorId);
   if (cached && cached.expiresAt > Date.now() + 300_000) {
     return { url: cached.url, cached: true };
   }
 
   const browser = await getBrowser();
-
   try {
     const context = await browser.newContext({
       userAgent:
@@ -32,8 +30,6 @@ async function fetchM3u8FromRoom(anchorId) {
     const page = await context.newPage();
 
     let m3u8Url = null;
-
-    // Intercept m3u8 responses
     page.on('response', (response) => {
       const url = response.url();
       if (url.includes('.m3u8') && url.includes('cdnsi')) {
@@ -41,36 +37,37 @@ async function fetchM3u8FromRoom(anchorId) {
       }
     });
 
+    // Visit homepage first to pass age gate
+    await page.goto('https://567tv2.com/home', {
+      timeout: 15000,
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForTimeout(3000);
+
+    // Click age verification
+    try {
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll('*')) {
+          if (
+            (el.innerText || '').trim() === 'Saya sudah berusia 18 tahun' &&
+            el.tagName !== 'P'
+          ) {
+            el.click();
+            return;
+          }
+        }
+      });
+      await page.waitForTimeout(3000);
+    } catch {}
+
     // Navigate to room
     await page.goto(`https://567tv2.com/room/${anchorId}`, {
-      timeout: 20000,
+      timeout: 15000,
       waitUntil: 'domcontentloaded',
     });
 
-    // Handle age verification
-    await page.waitForTimeout(3000);
-    try {
-      const hasAgeGate = await page.evaluate(() =>
-        document.body.innerText.includes('18 tahun')
-      );
-      if (hasAgeGate) {
-        await page.evaluate(() => {
-          for (const el of document.querySelectorAll('*')) {
-            if (
-              (el.innerText || '').trim() === 'Saya sudah berusia 18 tahun' &&
-              el.tagName !== 'P'
-            ) {
-              el.click();
-              return;
-            }
-          }
-        });
-        await page.waitForTimeout(8000);
-      }
-    } catch {}
-
-    // Wait for m3u8 (up to 15s)
-    for (let i = 0; i < 15 && !m3u8Url; i++) {
+    // Wait for m3u8 (up to 20s)
+    for (let i = 0; i < 20 && !m3u8Url; i++) {
       await page.waitForTimeout(1000);
     }
 
@@ -96,7 +93,6 @@ async function fetchM3u8FromRoom(anchorId) {
         const expire = parseInt(urlObj.searchParams.get('expire') || '0');
         if (expire > 0) expiresAt = expire * 1000;
       } catch {}
-
       cache.set(anchorId, { url: m3u8Url, expiresAt });
       return { url: m3u8Url, cached: false };
     }
@@ -108,29 +104,17 @@ async function fetchM3u8FromRoom(anchorId) {
 }
 
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { id } = req.query;
-
-  if (!id) {
-    return res.status(400).json({ error: 'Missing anchorId parameter' });
-  }
+  if (!id) return res.status(400).json({ error: 'Missing anchorId' });
 
   try {
     const result = await fetchM3u8FromRoom(id);
-
     if (!result) {
-      return res.status(404).json({
-        error: 'Could not extract m3u8 URL. Stream may be offline.',
-      });
+      return res.status(404).json({ error: 'Could not extract m3u8 URL' });
     }
-
-    return res.status(200).json({
-      m3u8: result.url,
-      cached: result.cached,
-    });
+    return res.status(200).json({ m3u8: result.url, cached: result.cached });
   } catch (err) {
     console.error('Stream extraction error:', err);
     return res.status(500).json({ error: err.message });

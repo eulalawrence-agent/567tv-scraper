@@ -3,6 +3,17 @@ import dynamic from 'next/dynamic';
 
 const HlsPlayer = dynamic(() => import('../components/HlsPlayer'), { ssr: false });
 
+const REGIONS = [
+  { code: 'ID', label: '🇮🇩 Indonesia' },
+  { code: 'VN', label: '🇻🇳 Vietnam' },
+  { code: 'TH', label: '🇹🇭 Thailand' },
+  { code: 'PH', label: '🇵🇭 Philippines' },
+  { code: 'MY', label: '🇲🇾 Malaysia' },
+  { code: 'MM', label: '🇲🇲 Myanmar' },
+  { code: 'KH', label: '🇰🇭 Cambodia' },
+  { code: 'LA', label: '🇱🇦 Laos' },
+];
+
 export default function Home() {
   const [streams, setStreams] = useState([]);
   const [page, setPage] = useState(1);
@@ -12,16 +23,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [areaFilter, setAreaFilter] = useState('all');
+  const [region, setRegion] = useState('ID');
   const [m3u8, setM3u8] = useState(null);
   const [m3u8Loading, setM3u8Loading] = useState(false);
   const [m3u8Error, setM3u8Error] = useState(null);
 
-  const fetchStreams = useCallback(async (p = 1) => {
+  const fetchStreams = useCallback(async (p = 1, area = region) => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(`/api/streams?page=${p}&size=30`);
+      const resp = await fetch(`/api/streams?page=${p}&size=30&area=${area}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
@@ -34,9 +45,15 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [region]);
 
   useEffect(() => { fetchStreams(1); }, [fetchStreams]);
+
+  const switchRegion = (code) => {
+    setRegion(code);
+    setSearch('');
+    fetchStreams(1, code);
+  };
 
   const fetchM3u8 = async (anchorId) => {
     setM3u8Loading(true);
@@ -61,7 +78,6 @@ export default function Home() {
     setSelected(stream);
     setM3u8(null);
     setM3u8Error(null);
-    // Auto-fetch m3u8
     fetchM3u8(stream.anchorId);
   };
 
@@ -74,15 +90,11 @@ export default function Home() {
 
   const filtered = streams.filter((s) => {
     const q = search.toLowerCase();
-    const matchSearch = !search ||
+    return !search ||
       s.name?.toLowerCase().includes(q) ||
       s.liveName?.toLowerCase().includes(q) ||
       s.anchorId?.includes(search);
-    const matchArea = areaFilter === 'all' || s.area === areaFilter;
-    return matchSearch && matchArea;
   });
-
-  const areas = ['all', ...new Set(streams.map(s => s.area).filter(Boolean))];
 
   const fmt = (n) => {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -97,6 +109,19 @@ export default function Home() {
         <p className="subtitle">{total.toLocaleString()} live streams</p>
       </header>
 
+      {/* Region Tabs */}
+      <div className="region-tabs">
+        {REGIONS.map(r => (
+          <button
+            key={r.code}
+            className={`region-btn ${region === r.code ? 'active' : ''}`}
+            onClick={() => switchRegion(r.code)}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
       <div className="controls">
         <input
           type="text"
@@ -105,17 +130,6 @@ export default function Home() {
           onChange={(e) => setSearch(e.target.value)}
           className="search"
         />
-        <div className="area-filter">
-          {areas.map(a => (
-            <button
-              key={a}
-              className={`area-btn ${areaFilter === a ? 'active' : ''}`}
-              onClick={() => setAreaFilter(a)}
-            >
-              {a === 'all' ? '🌍 All' : a}
-            </button>
-          ))}
-        </div>
       </div>
 
       {error && (
@@ -134,7 +148,6 @@ export default function Home() {
             </div>
             <p className="modal-live">{selected.liveName}</p>
 
-            {/* HLS Player */}
             <div className="player-wrapper">
               {m3u8Loading && (
                 <div className="player-loading">

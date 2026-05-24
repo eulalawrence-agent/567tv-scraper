@@ -4,10 +4,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { page = 1, size = 30 } = req.query;
+  const { page = 1, size = 30, area = 'ID' } = req.query;
 
   try {
-    const url = `${STREAM_API}?pageNum=${page}&pageSize=${size}&merchantId=539`;
+    const url = `${STREAM_API}?pageNum=${page}&pageSize=${size}&merchantId=539&area=${area}`;
     const resp = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
@@ -46,6 +46,7 @@ export default async function handler(req, res) {
       page: data.current,
       pages: data.pages,
       size: data.size,
+      area,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });

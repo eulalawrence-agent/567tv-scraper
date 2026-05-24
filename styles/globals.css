@@ -33,6 +33,35 @@ body {
   font-size: 0.95rem;
 }
 
+/* Region Tabs */
+.region-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.region-btn {
+  padding: 8px 16px;
+  border: 1px solid #2a2a3e;
+  border-radius: 20px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.region-btn:hover { border-color: #6e8efb; color: #e0e0e0; }
+.region-btn.active {
+  background: linear-gradient(135deg, #6e8efb, #c44dff);
+  border-color: transparent;
+  color: #fff;
+}
+
 /* Controls */
 .controls {
   display: flex;

@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const ROOM_BASE = 'https://567tv2.com/room/';
-
 export default function Home() {
   const [streams, setStreams] = useState([]);
   const [page, setPage] = useState(1);
@@ -35,9 +33,10 @@ export default function Home() {
   useEffect(() => { fetchStreams(1); }, [fetchStreams]);
 
   const filtered = streams.filter((s) => {
+    const q = search.toLowerCase();
     const matchSearch = !search ||
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.liveName?.toLowerCase().includes(search.toLowerCase()) ||
+      s.name?.toLowerCase().includes(q) ||
+      s.liveName?.toLowerCase().includes(q) ||
       s.anchorId?.includes(search);
     const matchArea = areaFilter === 'all' || s.area === areaFilter;
     return matchSearch && matchArea;
@@ -45,7 +44,7 @@ export default function Home() {
 
   const areas = ['all', ...new Set(streams.map(s => s.area).filter(Boolean))];
 
-  const formatViewers = (n) => {
+  const fmt = (n) => {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
     return String(n);
@@ -61,7 +60,7 @@ export default function Home() {
       <div className="controls">
         <input
           type="text"
-          placeholder="Search name or ID..."
+          placeholder="🔍 Search name or ID..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="search"
@@ -79,43 +78,74 @@ export default function Home() {
         </div>
       </div>
 
-      {error && <div className="error">❌ {error} <button onClick={() => fetchStreams(page)}>Retry</button></div>}
+      {error && (
+        <div className="error">
+          ❌ {error} <button onClick={() => fetchStreams(page)}>Retry</button>
+        </div>
+      )}
 
+      {/* Player Modal */}
       {selected && (
         <div className="modal-overlay" onClick={() => setSelected(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
-            <h2>{selected.name}</h2>
+            <div className="modal-header">
+              <h2>{selected.name}</h2>
+              <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+            </div>
             <p className="modal-live">{selected.liveName}</p>
+            <div className="player-wrapper">
+              <iframe
+                src={`https://567tv2.com/room/${selected.anchorId}`}
+                className="player-iframe"
+                allow="autoplay; fullscreen; picture-in-picture"
+                allowFullScreen
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              />
+            </div>
             <div className="modal-actions">
-              <a href={`${ROOM_BASE}${selected.anchorId}`} target="_blank" rel="noopener" className="btn btn-primary">
-                ▶️ Watch on 567TV
+              <a
+                href={`https://567tv2.com/room/${selected.anchorId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary"
+              >
+                🔗 Open in New Tab
               </a>
-              <button className="btn btn-secondary" onClick={() => {
-                navigator.clipboard.writeText(`${ROOM_BASE}${selected.anchorId}`);
-              }}>
-                📋 Copy Room URL
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(`https://567tv2.com/room/${selected.anchorId}`);
+                }}
+              >
+                📋 Copy URL
               </button>
             </div>
             <div className="modal-info">
-              <span>👥 {formatViewers(selected.viewers)}</span>
+              <span>👥 {fmt(selected.viewers)}</span>
               <span>📍 {selected.showArea || selected.area}</span>
-              <span>🎮 {selected.gameName}</span>
+              {selected.gameName && <span>🎮 {selected.gameName}</span>}
             </div>
           </div>
         </div>
       )}
 
       {loading ? (
-        <div className="loading">Loading streams...</div>
+        <div className="loading">
+          <div className="spinner" />
+          Loading streams...
+        </div>
       ) : (
         <div className="grid">
           {filtered.map(s => (
             <div key={s.id} className="card" onClick={() => setSelected(s)}>
               <div className="card-img">
                 <img src={s.cover} alt={s.name} loading="lazy" />
-                <span className="viewers">👥 {formatViewers(s.viewers)}</span>
-                {s.gameIcon && <span className="game-badge"><img src={s.gameIcon} alt="" />{s.gameName}</span>}
+                <span className="viewers">👥 {fmt(s.viewers)}</span>
+                {s.gameIcon && (
+                  <span className="game-badge">
+                    <img src={s.gameIcon} alt="" />{s.gameName}
+                  </span>
+                )}
               </div>
               <div className="card-body">
                 <h3>{s.name}</h3>
@@ -128,9 +158,13 @@ export default function Home() {
       )}
 
       <div className="pagination">
-        <button disabled={page <= 1} onClick={() => fetchStreams(page - 1)}>← Prev</button>
+        <button disabled={page <= 1} onClick={() => fetchStreams(page - 1)}>
+          ← Prev
+        </button>
         <span>Page {page} / {pages}</span>
-        <button disabled={page >= pages} onClick={() => fetchStreams(page + 1)}>Next →</button>
+        <button disabled={page >= pages} onClick={() => fetchStreams(page + 1)}>
+          Next →
+        </button>
       </div>
     </div>
   );

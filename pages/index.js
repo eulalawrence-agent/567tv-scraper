@@ -1,115 +1,137 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-function formatViewers(n) {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return n.toString();
-}
-
-function StreamCard({ stream }) {
-  return (
-    <a
-      className="stream-card"
-      href={`https://567tv2.com/room/${stream.anchorId}`}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      <div className="stream-cover-wrap">
-        <img
-          src={stream.cover}
-          alt={stream.name}
-          className="stream-cover"
-          loading="lazy"
-          onError={(e) => {
-            e.target.src =
-              'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect fill="%23222" width="200" height="200"/></svg>';
-          }}
-        />
-        <div className="stream-live-badge">LIVE</div>
-        <div className="stream-viewers">{formatViewers(stream.viewers)}</div>
-      </div>
-      <div className="stream-info">
-        <div className="stream-name">{stream.name}</div>
-        <div className="stream-area">{stream.area}</div>
-      </div>
-    </a>
-  );
-}
+const ROOM_BASE = 'https://567tv2.com/room/';
 
 export default function Home() {
   const [streams, setStreams] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [areaFilter, setAreaFilter] = useState('all');
 
-  const fetchStreams = async (p = 1) => {
+  const fetchStreams = useCallback(async (p = 1) => {
     setLoading(true);
+    setError(null);
     try {
       const resp = await fetch(`/api/streams?page=${p}&size=30`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      setStreams(data.streams);
-      setTotalPages(data.pages);
-      setPage(p);
-    } catch {
+      if (data.error) throw new Error(data.error);
+      setStreams(data.streams || []);
+      setPages(data.pages || 1);
+      setTotal(data.total || 0);
+      setPage(data.page || p);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchStreams();
   }, []);
 
-  const filtered = streams.filter(
-    (s) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.liveName.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => { fetchStreams(1); }, [fetchStreams]);
+
+  const filtered = streams.filter((s) => {
+    const matchSearch = !search ||
+      s.name?.toLowerCase().includes(search.toLowerCase()) ||
+      s.liveName?.toLowerCase().includes(search.toLowerCase()) ||
+      s.anchorId?.includes(search);
+    const matchArea = areaFilter === 'all' || s.area === areaFilter;
+    return matchSearch && matchArea;
+  });
+
+  const areas = ['all', ...new Set(streams.map(s => s.area).filter(Boolean))];
+
+  const formatViewers = (n) => {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+  };
 
   return (
-    <div className="app">
+    <div className="container">
       <header className="header">
-        <h1 className="title">📺 567TV Streams</h1>
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="search-input"
-        />
+        <h1>📺 567TV Stream Browser</h1>
+        <p className="subtitle">{total.toLocaleString()} live streams</p>
       </header>
 
-      {loading ? (
-        <div className="loading">Loading...</div>
-      ) : (
-        <>
-          <div className="stream-grid">
-            {filtered.map((stream) => (
-              <StreamCard key={stream.anchorId} stream={stream} />
-            ))}
-          </div>
-
-          <div className="pagination">
-            <button disabled={page <= 1} onClick={() => fetchStreams(page - 1)}>
-              ←
-            </button>
-            <span>
-              {page}/{totalPages}
-            </span>
+      <div className="controls">
+        <input
+          type="text"
+          placeholder="Search name or ID..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="search"
+        />
+        <div className="area-filter">
+          {areas.map(a => (
             <button
-              disabled={page >= totalPages}
-              onClick={() => fetchStreams(page + 1)}
+              key={a}
+              className={`area-btn ${areaFilter === a ? 'active' : ''}`}
+              onClick={() => setAreaFilter(a)}
             >
-              →
+              {a === 'all' ? '🌍 All' : a}
             </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <div className="error">❌ {error} <button onClick={() => fetchStreams(page)}>Retry</button></div>}
+
+      {selected && (
+        <div className="modal-overlay" onClick={() => setSelected(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+            <h2>{selected.name}</h2>
+            <p className="modal-live">{selected.liveName}</p>
+            <div className="modal-actions">
+              <a href={`${ROOM_BASE}${selected.anchorId}`} target="_blank" rel="noopener" className="btn btn-primary">
+                ▶️ Watch on 567TV
+              </a>
+              <button className="btn btn-secondary" onClick={() => {
+                navigator.clipboard.writeText(`${ROOM_BASE}${selected.anchorId}`);
+              }}>
+                📋 Copy Room URL
+              </button>
+            </div>
+            <div className="modal-info">
+              <span>👥 {formatViewers(selected.viewers)}</span>
+              <span>📍 {selected.showArea || selected.area}</span>
+              <span>🎮 {selected.gameName}</span>
+            </div>
           </div>
-        </>
+        </div>
       )}
 
-      <footer className="footer">
-        Data from 567tv2.com • Opens in 567tv player
-      </footer>
+      {loading ? (
+        <div className="loading">Loading streams...</div>
+      ) : (
+        <div className="grid">
+          {filtered.map(s => (
+            <div key={s.id} className="card" onClick={() => setSelected(s)}>
+              <div className="card-img">
+                <img src={s.cover} alt={s.name} loading="lazy" />
+                <span className="viewers">👥 {formatViewers(s.viewers)}</span>
+                {s.gameIcon && <span className="game-badge"><img src={s.gameIcon} alt="" />{s.gameName}</span>}
+              </div>
+              <div className="card-body">
+                <h3>{s.name}</h3>
+                <p>{s.liveName}</p>
+                <span className="area-tag">{s.showArea || s.area}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="pagination">
+        <button disabled={page <= 1} onClick={() => fetchStreams(page - 1)}>← Prev</button>
+        <span>Page {page} / {pages}</span>
+        <button disabled={page >= pages} onClick={() => fetchStreams(page + 1)}>Next →</button>
+      </div>
     </div>
   );
 }
